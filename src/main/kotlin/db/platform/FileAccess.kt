@@ -50,6 +50,7 @@ open class FixSizeFileAccess(override val path: Path, val size: Long = 0, mode: 
 
 }
 
+private const val MaxIncreaseSize = 655370L
 
 open class AutoIncreaseFileAccess(override val path: Path, minimumSize: Long = 0, mode: String = "rw") : FileAccess {
     private val file = RandomAccessFile(path.toString(), mode)
@@ -78,7 +79,6 @@ open class AutoIncreaseFileAccess(override val path: Path, minimumSize: Long = 0
     private inline fun movedPosition(position: Long): Int = position.toInt() + 8
 
 
-
     override fun length(): Long = actualLength
 
     override fun seek(position: Long) {
@@ -92,40 +92,22 @@ open class AutoIncreaseFileAccess(override val path: Path, minimumSize: Long = 0
 
     override fun write(position: Long, source: ByteArray, offset: Int, size: Int) {
         val movedPosition = movedPosition(position)
-        val length = size - offset
-        if (movedPosition + length >= fileLength) {
-            resizeSize(
-                max(
-                    (movedPosition(position) + length).toLong() shl 1,
-                    movedPosition(position) + length + 655370L
-                )
-            )
-        }
-
-        mmap.put(movedPosition, source, offset, size)
-
-        val newLength = position + length
+        val newLength = position + size
         if (newLength > actualLength) {
+            if (newLength >= fileLength - 8) {
+                resizeSize(
+                    max(
+                        newLength shl 1,
+                        newLength + MaxIncreaseSize
+                    )
+                )
+            }
             actualLength = newLength
             actualLength.toByteBigEndian(buffer)
             mmap.put(0, buffer)
         }
+        mmap.put(movedPosition, source, offset, size)
     }
-
-
-//    fun unmapMappedByteBuffer(buffer: MappedByteBuffer) {
-//        try {
-//            val cleanerMethod: Method = buffer.javaClass.getMethod("cleaner")
-//            cleanerMethod.isAccessible = true
-//            val cleaner = cleanerMethod.invoke(buffer)
-//            if (cleaner != null) {
-//                val cleanMethod = cleaner.javaClass.getMethod("clean")
-//                cleanMethod.invoke(cleaner)
-//            }
-//        } catch (e: Exception) {
-//            e.printStackTrace()
-//        }
-//    }
 
 
     override fun close() {

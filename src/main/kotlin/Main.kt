@@ -44,15 +44,15 @@ fun main() {
 //        testBox.put(TestClass("Aa",1).apply { id=1L+it })
 //    }
 
-    testConcurrent(testBox)
+//    testConcurrent(testBox)
 
-//    normalTest(
-//        testBox,
-//        create = { testBox.put(TestClass("a", age = it)) },
-//        update = { testBox.put(TestClass("d", age = it * 2).apply { id = it + 1L }) },
-//        read = { testBox.get(it + 1L) },
-//        remove = { testBox.remove(it + 1L) }
-//    )
+    normalTest(
+        testBox,
+        create = { testBox.put(TestClass("abcdefg", age = it)) },
+        update = { testBox.put(TestClass("abcdefg", age = it shl 1).apply { id = it + 1L }) },
+        read = { testBox.get(it + 1L) },
+        remove = { testBox.remove(it + 1L) }
+    )
 
 //
 //    testBox.remove(1)

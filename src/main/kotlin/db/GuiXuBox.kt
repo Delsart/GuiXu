@@ -1,4 +1,4 @@
-@file:Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER", "NOTHING_TO_INLINE")
+@file:Suppress("NOTHING_TO_INLINE")
 
 package work.delsart.guixu.db
 
@@ -30,6 +30,7 @@ class FileItem(val indexFile: AutoIncreaseFileAccess, val storeFile: AutoIncreas
 
 @Suppress("UNCHECKED_CAST")
 class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) {
+
     // structure: workingFileNum(1) | fileCount(1)
     // fileCount is ensured less than 3,
     private var metaDataFile = FixSizeFileAccess(Path(path, name), 2)
@@ -124,6 +125,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
             if (length > buffer.size) buffer = ByteArray(length)
             mergeFileArray[mergeFileI].storeFile.read(oldPosition, buffer, 0, length)
             outputStore.write(newPosition, buffer, 0, length)
+
             // copy index item
             newPosition.toByteBigEndian6Byte(indexItemBuffer)
             outputIndex.write(indexPosition, indexItemBuffer, 0, indexItemLength)
@@ -154,9 +156,9 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         outputStoreFile.close()
         outputIndexFile.close()
 
-        // todo need lock
+        // replace file
         inCompactReplaceFile = true
-        oldFileArray.fastForEach {
+        oldFileArray.forEach {
             it.indexFile.close()
             it.storeFile.close()
         }
@@ -179,9 +181,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
                 storeFile = AutoIncreaseFileAccess(oldFileArray[0].storeFile.path)
             ), oldFileArray[0]
         )
-        // lock close
         inCompactReplaceFile = false
-
 
         // delete other file
         var i = 1
@@ -190,7 +190,6 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
             SystemFileSystem.delete(oldFileArray[i].storeFile.path)
             i++
         }
-
 
         buffer[0] = workingFileNum.toByte()
         buffer[1] = min(buffer[1].toInt() + 1, 2).toByte()
@@ -203,7 +202,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         file.write(id * indexItemLength, writeBuffer, 0, indexItemLength)
     }
 
-    private inline fun append(id: Long, load: ByteArray) {
+    private inline fun appendStore(id: Long, load: ByteArray) {
         val fileItem = fileArray[0]
         val length = load.size
         var position = fileItem.storeFile.length()
@@ -213,19 +212,17 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
 
     @OptIn(ExperimentalSerializationApi::class)
     fun put(data: T) {
-        if (data.id >= nextId) {
-            error("id > nextId id:${data.id},nextId:$nextId")
-        }
+        if (data.id >= nextId) throw IllegalIdException(data.id, nextId)
         if (data.id == 0L) {
             data.id = nextId++
         }
         val byteArray = ProtoBuf.encodeToByteArray(serializer, data)
-        append(id = data.id, load = byteArray)
+        appendStore(id = data.id, load = byteArray)
     }
 
 
     fun getByte(id: Long, fileIndex: Int = 0): ByteArray {
-        if (fileIndex >= fileArray.size) error("item id:$id do not exist")
+        if (fileIndex >= fileArray.size) throw EntryNoFoundException(id)
         val indexPosition = id * indexItemLength
         var fileItem = fileArray[fileIndex]
         try {
@@ -234,7 +231,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
             val length = readBuffer.toIntBigEndianOffset6()
 
             if (length == 0) return getByte(id, fileIndex + 1)
-            if (length < 0) return error("item id:$id do not exist")
+            if (length < 0) throw EntryNoFoundException(id)
 
             val position = readBuffer.toLongBigEndian6byte()
             val array = ByteArray(length)
@@ -243,7 +240,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
             return array
         } catch (e: NullPointerException) {
             // when throw null point exception it means file is replacing,
-            // so wait for finish
+            // so wait for finishing
             println(e)
             while (inCompactReplaceFile) {
                 waitTime(5)
@@ -264,7 +261,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
 
     fun clear() {
         metaDataFile.close()
-        fileArray.fastForEach {
+        fileArray.forEach {
             it.indexFile.close()
             it.storeFile.close()
         }
@@ -272,7 +269,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         while (true) {
             try {
                 SystemFileSystem.delete(metaDataFile.path)
-                fileArray.fastForEach {
+                fileArray.forEach {
                     SystemFileSystem.delete(it.indexFile.path)
                     SystemFileSystem.delete(it.storeFile.path)
                 }
@@ -313,7 +310,7 @@ inline fun ByteArray.toIntBigEndianOffset6(): Int =
 
 @Suppress("BanInlineOptIn")
 @OptIn(ExperimentalContracts::class)
-inline fun <T> Array<T>.fastForEach(action: (T) -> Unit) {
+inline fun <T> Array<T>.forEach(action: (T) -> Unit) {
     contract { callsInPlace(action) }
     var i = 0
     while (i < this.size) {
@@ -325,3 +322,6 @@ inline fun <T> Array<T>.fastForEach(action: (T) -> Unit) {
 inline fun waitTime(time: Long) {
     Thread.sleep(time)
 }
+
+class EntryNoFoundException(id: Long) : Exception("item id:$id do not exist")
+class IllegalIdException(id: Long, nextId: Long) : Exception("id > nextId id:$id,nextId:$nextId")
