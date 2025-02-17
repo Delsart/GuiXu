@@ -93,7 +93,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
 
         var id = 0L
         var length = 0
-        var oldPosition = 0L
+        var oldPosition: Long
         var newPosition = 0L
         var mergeFileI: Int
         var indexPosition: Long

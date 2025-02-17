@@ -32,11 +32,12 @@ class GuiXu(val path: Path) {
 
     private val metaInfo: GuiXuMetaInfo = if (SystemFileSystem.exists(metaInfoPath))
         SystemFileSystem.source(metaInfoPath).buffered().readByteArray().let { ProtoBuf.decodeFromByteArray(it) }
-    else GuiXuMetaInfo().also { storeMetaInfo(it) }
+    else GuiXuMetaInfo()
 
     init {
         if (!SystemFileSystem.exists(path))
             SystemFileSystem.createDirectories(path)
+        storeMetaInfo(metaInfo)
     }
 
     private inline fun storeMetaInfo(data: GuiXuMetaInfo) {
