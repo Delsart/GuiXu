@@ -34,7 +34,6 @@ class GuiXu(val path: Path) {
         SystemFileSystem.source(metaInfoPath).buffered().readByteArray().let { ProtoBuf.decodeFromByteArray(it) }
     else GuiXuMetaInfo().also { storeMetaInfo(it) }
 
-
     init {
         if (!SystemFileSystem.exists(path))
             SystemFileSystem.createDirectories(path)
