@@ -1,0 +1,13 @@
+[versions]
+
+kotlin_serialaztion = "1.8.0"
+kotlin = "2.1.20-Beta2"
+kotlin_io = "0.6.0"
+
+[libraries]
+
+kotlinx-serialization-protobuf = { module = "org.jetbrains.kotlinx:kotlinx-serialization-protobuf", version.ref = "kotlin_serialaztion" }
+kotlinx-io = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlin_io" }
+
+[plugins]
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
