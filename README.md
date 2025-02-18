@@ -1,4 +1,4 @@
-# 归墟 GuiXu (Working in progress)
+# 归墟 GuiXu Database (Working in progress)
 
 ## Performance
 ![benchmark](/pictures/Snipaste_2025-02-18_11-56-15.png)
