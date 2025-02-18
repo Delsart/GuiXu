@@ -17,9 +17,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.reflect.KType
 
-abstract class StoreData {
-    var id: Long = 0
-}
 
 // position(8) | length(4)
 private const val indexItemLength = 12
@@ -154,7 +151,6 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
 
         mergeFile(outputStoreFile, outputIndexFile, oldFileArray)
 
-
         // there is no competition between write and compact
         // the only competition between read and compact is replace file below.
 
@@ -250,7 +246,6 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
             return getByte(id, 0)
         }
     }
-
 
     @OptIn(ExperimentalSerializationApi::class)
     fun get(id: Long): T {
