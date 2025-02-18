@@ -18,7 +18,7 @@ import kotlin.math.min
 import kotlin.reflect.KType
 
 
-// position(8) | length(4)
+// structure: position(8) | length(4)
 private const val indexItemLength = 12
 
 private const val deleteFlag = -2147483647
@@ -255,6 +255,21 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
     fun remove(id: Long) {
         setIndex(fileArray[0].indexFile, id, position = 0, length = deleteFlag)
     }
+
+    fun all(): List<T> {
+        val result = mutableListOf<T>()
+        val fileItem = fileArray[0]
+        val maxId = fileItem.indexFile.length() / indexItemLength
+        var id = 1L
+        while (id < maxId) {
+            try {
+                result.add(get(id))
+            } catch (e: EntryNoFoundException) { }
+            id++
+        }
+        return result
+    }
+
 
     fun clear() {
         metaDataFile.close()
