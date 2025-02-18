@@ -21,10 +21,13 @@ abstract class StoreData {
     var id: Long = 0
 }
 
-// position(6) | length(4)
-private const val indexItemLength = 10
+// position(8) | length(4)
+private const val indexItemLength = 12
 
 private const val deleteFlag = -2147483647
+private val emptyIndexItemArray = ByteArray(12)
+
+private const val spineTime = 5L
 
 class FileItem(val indexFile: AutoIncreaseFileAccess, val storeFile: AutoIncreaseFileAccess)
 
@@ -88,7 +91,6 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         outputIndex: AutoIncreaseFileAccess,
         mergeFileArray: Array<FileItem>,
     ) {
-        val indexItemBuffer = ByteArray(indexItemLength)
         var buffer = ByteArray(32)
         val maxId = mergeFileArray[0].indexFile.length() / indexItemLength
 
@@ -98,7 +100,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         var newPosition = 0L
         var mergeFileI: Int
         var indexPosition: Long
-        var fileItem: FileItem
+        var fileItem: FileItem = fileArray[0]
         while (id < maxId) {
             mergeFileI = 0
             indexPosition = id * indexItemLength
@@ -106,29 +108,28 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
             while (mergeFileI < mergeFileArray.size) {
                 fileItem = mergeFileArray[mergeFileI]
                 if (indexPosition > fileItem.indexFile.length()) break
-                fileItem.indexFile.read(indexPosition, indexItemBuffer, 0, indexItemLength)
-                length = indexItemBuffer.toIntBigEndianOffset6()
+                length = fileItem.indexFile.readInt(indexPosition + 8)
                 // find valid item
                 if (length > 0) break
                 mergeFileI++
             }
 
-            // no data, directly copy index item
+            // no data, set empty index item
             if (length < 1) {
-                outputIndex.write(indexPosition, indexItemBuffer, 0, indexItemLength)
+                outputIndex.write(indexPosition, emptyIndexItemArray, 0, indexItemLength)
                 id++
                 continue
             }
 
             // copy data
-            oldPosition = indexItemBuffer.toLongBigEndian6byte()
+            oldPosition = fileItem.indexFile.readLong(indexPosition)
             if (length > buffer.size) buffer = ByteArray(length)
-            mergeFileArray[mergeFileI].storeFile.read(oldPosition, buffer, 0, length)
+            fileItem.storeFile.read(oldPosition, buffer, 0, length)
             outputStore.write(newPosition, buffer, 0, length)
 
             // copy index item
-            newPosition.toByteBigEndian6Byte(indexItemBuffer)
-            outputIndex.write(indexPosition, indexItemBuffer, 0, indexItemLength)
+            outputIndex.writeLong(indexPosition, newPosition)
+            outputIndex.writeInt(indexPosition + 8, length)
 
             newPosition += length
             id++
@@ -153,8 +154,9 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
 
         mergeFile(outputStoreFile, outputIndexFile, oldFileArray)
 
-        outputStoreFile.close()
-        outputIndexFile.close()
+
+        // there is no competition between write and compact
+        // the only competition between read and compact is replace file below.
 
         // replace file
         inCompactReplaceFile = true
@@ -162,6 +164,8 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
             it.indexFile.close()
             it.storeFile.close()
         }
+        outputStoreFile.close()
+        outputIndexFile.close()
         System.gc()
         while (true) {
             try {
@@ -171,7 +175,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
             } catch (e: IOException) {
                 // wait for gc
                 println(e)
-                waitTime(5)
+                waitTime(spineTime)
             }
         }
         // reopen new object
@@ -196,10 +200,10 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         metaDataFile.write(0, buffer, 0, 2)
     }
 
-    private fun setIndex(file: AutoIncreaseFileAccess, id: Long, position: Long, length: Int) {
-        position.toByteBigEndian6Byte(writeBuffer)
-        length.toByteBigEndianOffset6(writeBuffer)
-        file.write(id * indexItemLength, writeBuffer, 0, indexItemLength)
+    private inline fun setIndex(file: AutoIncreaseFileAccess, id: Long, position: Long, length: Int) {
+        val filePosition = id * indexItemLength
+        file.writeLong(filePosition, position)
+        file.writeInt(filePosition + 8, length)
     }
 
     private inline fun appendStore(id: Long, load: ByteArray) {
@@ -226,14 +230,12 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         val indexPosition = id * indexItemLength
         var fileItem = fileArray[fileIndex]
         try {
-            fileItem.indexFile.read(indexPosition, readBuffer, 0, indexItemLength)
-
-            val length = readBuffer.toIntBigEndianOffset6()
+            val length = fileItem.indexFile.readInt(indexPosition + 8)
 
             if (length == 0) return getByte(id, fileIndex + 1)
             if (length < 0) throw EntryNoFoundException(id)
 
-            val position = readBuffer.toLongBigEndian6byte()
+            val position = fileItem.indexFile.readLong(indexPosition)
             val array = ByteArray(length)
 
             fileItem.storeFile.read(position, array, 0, length)
@@ -243,7 +245,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
             // so wait for finishing
             println(e)
             while (inCompactReplaceFile) {
-                waitTime(5)
+                waitTime(spineTime)
             }
             return getByte(id, 0)
         }
@@ -284,28 +286,6 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         initialMetaData()
     }
 }
-
-inline fun Long.toByteBigEndian6Byte(byteArray: ByteArray) {
-    byteArray[0] = (this ushr 40).toByte()
-    byteArray[1] = (this ushr 32).toByte()
-    byteArray[2] = (this ushr 24).toByte()
-    byteArray[3] = (this ushr 16).toByte()
-    byteArray[4] = (this ushr 8).toByte()
-    byteArray[5] = this.toByte()
-}
-
-inline fun Int.toByteBigEndianOffset6(byteArray: ByteArray) {
-    byteArray[6] = (this shr 24).toByte()
-    byteArray[7] = (this shr 16).toByte()
-    byteArray[8] = (this shr 8).toByte()
-    byteArray[9] = toByte()
-}
-
-inline fun ByteArray.toLongBigEndian6byte(): Long =
-    (((this[0].toLong() and 0xFF) shl 40) or ((this[1].toLong() and 0xFF) shl 32) or ((this[2].toLong() and 0xFF) shl 24) or ((this[3].toLong() and 0xFF) shl 16) or ((this[4].toLong() and 0xFF) shl 8) or (this[5].toLong() and 0xFF))
-
-inline fun ByteArray.toIntBigEndianOffset6(): Int =
-    (((this[6].toInt() and 0xFF) shl 24) or ((this[7].toInt() and 0xFF) shl 16) or ((this[8].toInt() and 0xFF) shl 8) or (this[9].toInt() and 0xFF))
 
 
 @Suppress("BanInlineOptIn")

@@ -30,7 +30,7 @@ import kotlin.text.plus
 data class TestClass(
     var name: String,
     var age: Int,
-//    val message:List<String> = List(1000) { "tfajhlajkshfjghjfghfhjfhfjgkjashfklhasklfhhajskf" }
+//    val message: List<String> = emptyList<String>()
 ) : StoreData()
 
 fun main() {
@@ -40,16 +40,17 @@ fun main() {
 
     testBox.clear()
 
+//    test()
 //    repeat(100) {
 //        testBox.put(TestClass("Aa",1).apply { id=1L+it })
 //    }
 
 //    testConcurrent(testBox)
-
+//
     normalTest(
         testBox,
-        create = { testBox.put(TestClass("abcdefg", age = it)) },
-        update = { testBox.put(TestClass("abcdefg", age = it shl 1).apply { id = it + 1L }) },
+        create = { testBox.put(TestClass("a", age = it)) },
+        update = { testBox.put(TestClass("a", age = it shl 1).apply { id = it + 1L }) },
         read = { testBox.get(it + 1L) },
         remove = { testBox.remove(it + 1L) }
     )
@@ -61,6 +62,27 @@ fun main() {
 
 //fun testPrint(message: Any) = println("${System.currentTimeMillis()} - ${message.toString()}")
 fun printTime() = println(System.currentTimeMillis())
+
+
+fun test() {
+    val i = 13213
+    var time = measureNanoTime {
+        repeat(1_000_000) {
+            i * 12
+        }
+
+    }
+    println("${time}ns")
+
+    time = measureNanoTime {
+        repeat(1_000_000) {
+            (i shl 3) + (i shl 2)
+        }
+
+    }
+    println("${time}ns")
+}
+
 
 fun testConcurrent(
     box: StorageBox<TestClass>
@@ -85,7 +107,7 @@ fun testConcurrent(
     }
 
     executorService.execute {
-        sleep(20)
+        sleep(30)
         repeat(100) {
             sleep(2)
             println(box.get((it + 1).toLong()))
