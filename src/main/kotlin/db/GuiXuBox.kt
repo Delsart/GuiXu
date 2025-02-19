@@ -152,7 +152,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         mergeFile(outputStoreFile, outputIndexFile, oldFileArray)
 
         // there is no competition between write and compact
-        // the only competition between read and compact is replace file below.
+        // the only competition between read and compact is replacing file progress below.
 
         // replace file
         inCompactReplaceFile = true
@@ -264,7 +264,8 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         while (id < maxId) {
             try {
                 result.add(get(id))
-            } catch (e: EntryNoFoundException) { }
+            } catch (e: EntryNoFoundException) {
+            }
             id++
         }
         return result
@@ -294,6 +295,14 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         }
         metaDataFile = FixSizeFileAccess(Path(path, name), 2)
         initialMetaData()
+    }
+
+    fun close() {
+        metaDataFile.close()
+        fileArray.forEach {
+            it.indexFile.close()
+            it.storeFile.close()
+        }
     }
 }
 

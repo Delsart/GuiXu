@@ -41,24 +41,24 @@ fun main() {
     testBox.clear()
 
 //    test()
-    repeat(100) {
-        testBox.put(TestClass("Aa", it))
-    }
-    repeat(10) {
-        testBox.remove(it + 10L)
-    }
-
-    println(testBox.all())
+//    repeat(100) {
+//        testBox.put(TestClass("Aa", it))
+//    }
+//    repeat(10) {
+//        testBox.remove(it + 10L)
+//    }
+//
+//    println(testBox.all())
 
 //    testConcurrent(testBox)
 //
-//    normalTest(
-//        testBox,
-//        create = { testBox.put(TestClass("a", age = it)) },
-//        update = { testBox.put(TestClass("a", age = it shl 1).apply { id = it + 1L }) },
-//        read = { testBox.get(it + 1L) },
-//        remove = { testBox.remove(it + 1L) }
-//    )
+    normalTest(
+        testBox,
+        create = { testBox.put(TestClass("a", age = it)) },
+        update = { testBox.put(TestClass("a", age = it shl 1).apply { id = it + 1L }) },
+        read = { testBox.get(it + 1L) },
+        remove = { testBox.remove(it + 1L) }
+    )
 
 //
 //    testBox.remove(1)
@@ -131,7 +131,7 @@ inline fun normalTest(
 
     val count = 10_000_000
 
-    println("count:$count")
+    println("count: $count")
 
     var time = measureTimeMillis {
         repeat(count) {
