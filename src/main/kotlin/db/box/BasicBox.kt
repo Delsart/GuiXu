@@ -1,51 +1,54 @@
 @file:Suppress("NOTHING_TO_INLINE")
 
-package work.delsart.guixu.db
+package work.delsart.guixu.db.box
 
 import kotlinx.io.IOException
+import kotlinx.io.files.FileSystem
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.protobuf.ProtoBuf
-import kotlinx.serialization.serializer
+import work.delsart.guixu.db.GuiXu
+import work.delsart.guixu.db.bean.BoxInfo
 import work.delsart.guixu.db.platform.AutoIncreaseFileAccess
+import work.delsart.guixu.db.platform.FileAccessMode
 import work.delsart.guixu.db.platform.FixSizeFileAccess
+import kotlin.concurrent.atomics.AtomicLong
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.concurrent.atomics.fetchAndIncrement
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.reflect.KType
 
 
 // structure: position(8) | length(4)
-private const val indexItemLength = 12
+const val indexItemLength = 12
 
-private const val deleteFlag = -2147483647
-private val emptyIndexItemArray = ByteArray(12)
+const val deleteFlag = -2147483647
 
-private const val spineTime = 5L
+const val spineTime = 5L
 
-class FileItem(val indexFile: AutoIncreaseFileAccess, val storeFile: AutoIncreaseFileAccess)
+@OptIn(ExperimentalAtomicApi::class)
+class FileItem(
+    val indexFile: AutoIncreaseFileAccess,
+    val storeFile: AutoIncreaseFileAccess,
+    val storeAppendPosition: AtomicLong = AtomicLong(storeFile.length())
+)
+
 
 @Suppress("UNCHECKED_CAST")
-class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) {
-
+@OptIn(ExperimentalAtomicApi::class)
+abstract class BasicBox(val host: GuiXu, val path: Path, val name: String) {
     // structure: workingFileNum(1) | fileCount(1)
     // fileCount is ensured less than 3,
-    private var metaDataFile = FixSizeFileAccess(Path(path, name), 2)
+    protected var metaDataFile = FixSizeFileAccess(Path(path, name), 2)
+    protected var fileArray: Array<FileItem> = emptyArray()
 
-    private var fileArray: Array<FileItem> = emptyArray()
+    // need be manipulated by implementation of box
+    // example: create: id = nextId++,
+    // arbitrary set value of id will cause file size increasing unexpectedly
+    protected val nextId = AtomicLong(1)
 
-    private val serializer: KSerializer<T> = serializer(kType) as KSerializer<T>
-
-    private val writeBuffer = ByteArray(indexItemLength)
-    private val readBuffer = ByteArray(indexItemLength)
-
-    var nextId = 1L
-        private set
-
-    private var inCompactReplaceFile = false
+    protected var inCompactReplaceFile = false
 
     init {
         initialMetaData()
@@ -55,33 +58,32 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         // initial metaData
         var workingFileNum = 0
         var fileCount = 1
-        metaDataFile.read(0, readBuffer, 0, 2)
-        if (readBuffer[1] > 0) {
-            workingFileNum = readBuffer[0].toInt()
-            fileCount = readBuffer[1].toInt()
+        val buffer = ByteArray(2)
+        metaDataFile.read(0, buffer, 0, 2)
+        if (buffer[1] > 0) {
+            workingFileNum = buffer[0].toInt()
+            fileCount = buffer[1].toInt()
         } else {
-            writeBuffer[0] = 0
-            writeBuffer[1] = 1
-            metaDataFile.write(0, writeBuffer, 0, 2)
+            buffer[0] = 0
+            buffer[1] = 1
+            metaDataFile.write(0, buffer, 0, 2)
         }
 
         // initial fileArray
-        fileArray = arrayOfNulls<FileItem>(fileCount) as Array<FileItem>
-        var i = 0
         var fileNum: Int
-        while (i < fileCount) {
-            fileNum = (workingFileNum - i + 3) % 3
-            fileArray[i] = FileItem(
-                indexFile = AutoIncreaseFileAccess(Path(path, "$name-index-$fileNum"), indexItemLength.toLong()),
-                storeFile = AutoIncreaseFileAccess(Path(path, "$name-$fileNum"))
+        fileArray = Array<FileItem>(fileCount) {
+            fileNum = (workingFileNum - it + 3) % 3
+            FileItem(
+                indexFile = host.autoIncreaseFileBuilder(
+                    Path(path, "$name-index-$fileNum"), indexItemLength.toLong(), FileAccessMode.RW
+                ),
+                storeFile = host.autoIncreaseFileBuilder(Path(path, "$name-$fileNum"), 0, FileAccessMode.RW)
             )
-            i++
         }
 
         // initial nextId
-        nextId = max(fileArray[0].indexFile.length() / indexItemLength, 1L)
+        nextId.store(max(fileArray[0].indexFile.length() / indexItemLength, 1L))
     }
-
 
     private fun mergeFile(
         outputStore: AutoIncreaseFileAccess,
@@ -89,6 +91,7 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         mergeFileArray: Array<FileItem>,
     ) {
         var buffer = ByteArray(32)
+        val emptyIndexItemArray = ByteArray(12)
         val maxId = mergeFileArray[0].indexFile.length() / indexItemLength
 
         var id = 0L
@@ -137,17 +140,23 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         val buffer = ByteArray(2)
         metaDataFile.read(0, buffer, 0, 2)
         val workingFileNum = (buffer[0].toInt() + 1) % 3
-
         val oldFileArray = fileArray
-        val newStoreFile = AutoIncreaseFileAccess(Path(path, "$name-$workingFileNum"))
-        val newIndexFile =
-            AutoIncreaseFileAccess(Path(path, "$name-index-$workingFileNum"), oldFileArray[0].indexFile.length())
-        val outputStoreFile = AutoIncreaseFileAccess(Path(path, "$name-temp"))
-        val outputIndexFile = AutoIncreaseFileAccess(Path(path, "$name-index-temp"), oldFileArray[0].indexFile.length())
+
+        val newStoreFile = host.autoIncreaseFileBuilder(Path(path, "$name-$workingFileNum"), 0, FileAccessMode.RW)
+        val newIndexFile = host.autoIncreaseFileBuilder(
+            Path(path, "$name-index-$workingFileNum"), oldFileArray[0].indexFile.length(), FileAccessMode.RW
+        )
 
         fileArray =
             if (oldFileArray.size > 1) arrayOf(FileItem(newIndexFile, newStoreFile), oldFileArray[0], oldFileArray[1])
             else arrayOf(FileItem(newIndexFile, newStoreFile), oldFileArray[0])
+
+        // the output file is used under known circumstance,
+        // so we directly use AutoIncreaseFileAccess
+        val outputStoreFile = AutoIncreaseFileAccess(Path(path, "$name-temp"))
+        val outputIndexFile = AutoIncreaseFileAccess(Path(path, "$name-index-temp"), oldFileArray[0].indexFile.length())
+
+
 
         mergeFile(outputStoreFile, outputIndexFile, oldFileArray)
 
@@ -177,8 +186,8 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         // reopen new object
         fileArray = arrayOf(
             FileItem(
-                indexFile = AutoIncreaseFileAccess(oldFileArray[0].indexFile.path),
-                storeFile = AutoIncreaseFileAccess(oldFileArray[0].storeFile.path)
+                indexFile = host.autoIncreaseFileBuilder(oldFileArray[0].indexFile.path, 0, FileAccessMode.RW),
+                storeFile = host.autoIncreaseFileBuilder(oldFileArray[0].storeFile.path, 0, FileAccessMode.RW)
             ), oldFileArray[0]
         )
         inCompactReplaceFile = false
@@ -186,8 +195,8 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         // delete other file
         var i = 1
         while (i < oldFileArray.size) {
-            SystemFileSystem.delete(oldFileArray[i].indexFile.path)
-            SystemFileSystem.delete(oldFileArray[i].storeFile.path)
+            SystemFileSystem.deleteIfExist(oldFileArray[i].indexFile.path)
+            SystemFileSystem.deleteIfExist(oldFileArray[i].storeFile.path)
             i++
         }
 
@@ -196,32 +205,21 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         metaDataFile.write(0, buffer, 0, 2)
     }
 
-    private inline fun setIndex(file: AutoIncreaseFileAccess, id: Long, position: Long, length: Int) {
+    protected inline fun setIndex(file: AutoIncreaseFileAccess, id: Long, position: Long, length: Int) {
         val filePosition = id * indexItemLength
         file.writeLong(filePosition, position)
         file.writeInt(filePosition + 8, length)
     }
 
-    private inline fun appendStore(id: Long, load: ByteArray) {
+    protected inline fun appendStore(id: Long, load: ByteArray) {
         val fileItem = fileArray[0]
         val length = load.size
-        var position = fileItem.storeFile.length()
+        val position = fileItem.storeAppendPosition.fetchAndAdd(length.toLong())
         setIndex(fileItem.indexFile, id, position, length)
         fileItem.storeFile.write(position, load, 0, length)
     }
 
-    @OptIn(ExperimentalSerializationApi::class)
-    fun put(data: T) {
-        if (data.id >= nextId) throw IllegalIdException(data.id, nextId)
-        if (data.id == 0L) {
-            data.id = nextId++
-        }
-        val byteArray = ProtoBuf.encodeToByteArray(serializer, data)
-        appendStore(id = data.id, load = byteArray)
-    }
-
-
-    fun getByte(id: Long, fileIndex: Int = 0): ByteArray {
+    protected fun getByte(id: Long, fileIndex: Int = 0): ByteArray {
         if (fileIndex >= fileArray.size) throw EntryNoFoundException(id)
         val indexPosition = id * indexItemLength
         var fileItem = fileArray[fileIndex]
@@ -247,32 +245,30 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         }
     }
 
-    @OptIn(ExperimentalSerializationApi::class)
-    fun get(id: Long): T {
-        return ProtoBuf.decodeFromByteArray(serializer, getByte(id)).also { it.id = id }
-    }
-
-    fun remove(id: Long) {
-        setIndex(fileArray[0].indexFile, id, position = 0, length = deleteFlag)
-    }
-
-    fun all(): List<T> {
-        val result = mutableListOf<T>()
+    protected inline fun traversAll(action: (ByteArray) -> Unit) {
         val fileItem = fileArray[0]
         val maxId = fileItem.indexFile.length() / indexItemLength
         var id = 1L
         while (id < maxId) {
             try {
-                result.add(get(id))
+                action(getByte(id))
             } catch (e: EntryNoFoundException) {
             }
             id++
         }
-        return result
+    }
+
+    protected inline fun checkIdAndGet(id: Long): Long {
+        if (id == 0L) {
+            return nextId.fetchAndIncrement()
+        }
+        val localNextId = nextId.load()
+        if (id >= localNextId) throw IllegalIdException(id, localNextId)
+        return id
     }
 
 
-    fun clear() {
+    open fun clear(reInit: Boolean = true) {
         metaDataFile.close()
         fileArray.forEach {
             it.indexFile.close()
@@ -281,28 +277,45 @@ class StorageBox<T : StoreData>(kType: KType, val path: Path, val name: String) 
         System.gc()
         while (true) {
             try {
-                SystemFileSystem.delete(metaDataFile.path)
+                SystemFileSystem.deleteIfExist(metaDataFile.path)
                 fileArray.forEach {
-                    SystemFileSystem.delete(it.indexFile.path)
-                    SystemFileSystem.delete(it.storeFile.path)
+                    SystemFileSystem.deleteIfExist(it.indexFile.path)
+                    SystemFileSystem.deleteIfExist(it.storeFile.path)
                 }
                 break
             } catch (e: IOException) {
                 // wait for gc
                 println(e)
-                waitTime(5)
+                waitTime(spineTime)
             }
         }
-        metaDataFile = FixSizeFileAccess(Path(path, name), 2)
-        initialMetaData()
+        if (reInit) {
+            metaDataFile = FixSizeFileAccess(Path(path, name), 2)
+            initialMetaData()
+        }
     }
 
-    fun close() {
+    protected inline fun removeEntry(id: Long) {
+        setIndex(fileArray[0].indexFile, id, position = 0, length = deleteFlag)
+    }
+
+    open fun close() {
         metaDataFile.close()
         fileArray.forEach {
             it.indexFile.close()
             it.storeFile.close()
         }
+    }
+
+    open fun getInfo(): BoxInfo {
+        var dataSize = 0L
+        var indexSize = 0L
+        val localFileArray = fileArray
+        localFileArray.forEach {
+            dataSize += it.storeFile.fileSize
+            indexSize += it.indexFile.fileSize
+        }
+        return BoxInfo(dataSize, indexSize)
     }
 }
 
@@ -324,3 +337,8 @@ inline fun waitTime(time: Long) {
 
 class EntryNoFoundException(id: Long) : Exception("item id:$id do not exist")
 class IllegalIdException(id: Long, nextId: Long) : Exception("id > nextId id:$id,nextId:$nextId")
+
+inline fun FileSystem.deleteIfExist(path: Path) {
+    if (exists(path))
+        delete(path)
+}

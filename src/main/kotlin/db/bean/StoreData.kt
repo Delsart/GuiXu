@@ -1,5 +1,4 @@
-package work.delsart.guixu.db
-
+package work.delsart.guixu.db.bean
 
 abstract class StoreData {
     /**

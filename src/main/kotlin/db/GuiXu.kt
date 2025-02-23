@@ -1,55 +1,60 @@
 @file:Suppress("NOTHING_TO_INLINE")
+
 package work.delsart.guixu.db
 
 
-import kotlinx.io.buffered
 import kotlinx.io.files.Path
-import kotlinx.io.files.SystemFileSystem
-import kotlinx.io.readByteArray
 import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromByteArray
-import kotlinx.serialization.encodeToByteArray
-import kotlinx.serialization.protobuf.ProtoBuf
+import work.delsart.guixu.db.bean.StoreData
+import work.delsart.guixu.db.box.BasicBox
+import work.delsart.guixu.db.box.ByteArrayBox
+import work.delsart.guixu.db.box.KVBox
+import work.delsart.guixu.db.box.TypedBox
+import work.delsart.guixu.db.platform.AutoIncreaseFileAccess
+import work.delsart.guixu.db.platform.AutoIncreaseFileBuilder
+import work.delsart.guixu.db.platform.FileAccess
 import kotlin.reflect.typeOf
 
-@Serializable
-private data class BoxInfo(
-    val name: String,
-    var nextId: Long = 1
-)
+private const val metaInfoName = "metaInfo"
 
-@Serializable
-private data class GuiXuMetaInfo(
-    val maxSize: Long = 1024 * 1024 * 10,
-    var boxInfoList: List<BoxInfo> = emptyList<BoxInfo>()
-)
 
 @OptIn(ExperimentalSerializationApi::class)
-class GuiXu(val path: Path) {
+class GuiXu(
+    val path: Path,
+    // maybe we need some specific file access implementation
+    val autoIncreaseFileBuilder: AutoIncreaseFileBuilder = { path, minimumSize, mode ->
+        AutoIncreaseFileAccess(path, minimumSize, mode)
+    }
+) {
+    private val boxList: MutableList<BasicBox> = mutableListOf()
 
     private val metaInfoPath = Path(path, metaInfoName)
 
-    private val metaInfo: GuiXuMetaInfo = if (SystemFileSystem.exists(metaInfoPath))
-        SystemFileSystem.source(metaInfoPath).buffered().readByteArray().let { ProtoBuf.decodeFromByteArray(it) }
-    else GuiXuMetaInfo()
 
     init {
-        if (!SystemFileSystem.exists(path))
-            SystemFileSystem.createDirectories(path)
-        storeMetaInfo(metaInfo)
+
     }
 
-    private inline fun storeMetaInfo(data: GuiXuMetaInfo) {
-        SystemFileSystem.sink(metaInfoPath).buffered().write(ProtoBuf.encodeToByteArray(data))
-    }
-
-    inline fun <reified T: StoreData> boxFor(name: String? = null): StorageBox<T> {
+    inline fun <reified T : StoreData> boxFor(name: String? = null): TypedBox<T> {
         val kType = typeOf<T>()
         val theName = name ?: kType.toString()
-        return StorageBox(kType, path, theName)
+        return TypedBox(kType, this, path, theName)
+    }
+
+
+    fun byteArrayBoxFor(name: String): ByteArrayBox {
+        return ByteArrayBox(this, path, name)
+    }
+
+    fun kvBoxFor(name: String): KVBox {
+        return KVBox(this, path, name)
+    }
+
+    fun clear(reInit: Boolean = false) {
+        boxList.forEach {
+            it.clear(reInit)
+        }
     }
 
 }
 
-private const val metaInfoName = "metaInfo"

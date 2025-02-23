@@ -1,29 +1,21 @@
 package work.delsart.guixu
 
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.time.delay
 import kotlinx.io.files.Path
 import kotlinx.serialization.Serializable
 import work.delsart.guixu.db.GuiXu
-import work.delsart.guixu.db.StorageBox
-import work.delsart.guixu.db.StoreData
+import work.delsart.guixu.db.bean.StoreData
+import work.delsart.guixu.db.box.TypedBox
 import java.lang.Thread.sleep
 import java.util.concurrent.Executors
 import kotlin.Int
 import kotlin.String
 import kotlin.Unit
-import kotlin.collections.plus
-import kotlin.plus
 import kotlin.repeat
-import kotlin.sequences.plus
 import kotlin.system.measureNanoTime
 import kotlin.system.measureTimeMillis
-import kotlin.text.plus
 
 
 @Serializable
@@ -36,37 +28,42 @@ data class TestClass(
 fun main() {
     val path = Path("E:\\Projects\\GuiXuDB\\test")
     val db = GuiXu(path)
-    var testBox = db.boxFor<TestClass>()
+//    var typedBox = db.boxFor<TestClass>()
+//    var byteArrayBox = db.byteArrayBoxFor("test")
+    var kvBox = db.kvBoxFor("testKv")
 
-    testBox.clear()
 
-//    test()
-//    repeat(100) {
-//        testBox.put(TestClass("Aa", it))
-//    }
-//    repeat(10) {
-//        testBox.remove(it + 10L)
-//    }
-//
-//    println(testBox.all())
+//    typedBox.clear()
+//    byteArrayBox.clear()
+    kvBox.clear()
 
 //    testConcurrent(testBox)
 //
+//    normalTest(
+//        create = { typedBox.put(TestClass("a", age = it)) },
+//        update = { typedBox.put(TestClass("a", age = it shl 1).apply { id = it + 1L }) },
+//        read = { typedBox.get(it + 1L) },
+//        remove = { typedBox.remove(it + 1L) }
+//    )
+
+//    val byteArray = byteArrayOf(1, 23, 2, 4, 1)
+//    normalTest(
+//        create = { byteArrayBox.put(data = byteArray) },
+//        update = { byteArrayBox.put(it + 1L, byteArray.also { array -> array[0] = it.toByte() }) },
+//        read = { byteArrayBox.get(it + 1L) },
+//        remove = { byteArrayBox.remove(it + 1L) }
+//    )
+
+
     normalTest(
-        testBox,
-        create = { testBox.put(TestClass("a", age = it)) },
-        update = { testBox.put(TestClass("a", age = it shl 1).apply { id = it + 1L }) },
-        read = { testBox.get(it + 1L) },
-        remove = { testBox.remove(it + 1L) }
+        count = 1000,
+        create = { kvBox.putInt(it.toString(),0) },
+        update = { kvBox.putInt(it.toString(),1) },
+        read = { kvBox.getInt(it.toString()) },
+        remove = {  kvBox.remove(it.toString()) }
     )
 
-//
-//    testBox.remove(1)
-//    println(testBox.get(1))
 }
-
-//fun testPrint(message: Any) = println("${System.currentTimeMillis()} - ${message.toString()}")
-fun printTime() = println(System.currentTimeMillis())
 
 
 fun test() {
@@ -90,7 +87,7 @@ fun test() {
 
 
 fun testConcurrent(
-    box: StorageBox<TestClass>
+    box: TypedBox<TestClass>
 ) {
     val executorService = Executors.newCachedThreadPool()
     executorService.execute {
@@ -122,14 +119,13 @@ fun testConcurrent(
 
 
 inline fun normalTest(
-    box: StorageBox<TestClass>,
+    count: Int = 10_000_000,
     create: (Int) -> Unit,
     update: (Int) -> Unit,
     read: (Int) -> Unit,
     remove: (Int) -> Unit,
 ) {
 
-    val count = 10_000_000
 
     println("count: $count")
 
@@ -138,7 +134,6 @@ inline fun normalTest(
             create(it)
         }
     }
-
     println("create: ${time}ms")
     println(time.toFloat() / count)
 
@@ -171,10 +166,9 @@ inline fun normalTest(
 
 }
 
-fun writeIntervalTest(box: StorageBox<TestClass>) {
+fun writeIntervalTest(box: TypedBox<TestClass>) {
     runBlocking {
         repeat(100) {
-            box.clear()
 
             var time = System.currentTimeMillis()
             val count = 100
