@@ -14,9 +14,7 @@ import kotlin.concurrent.atomics.fetchAndIncrement
 
 private const val kvItemFixLength = 13L
 
-
 private object DeletedEmpty
-
 private data class KVItem(
     val filePosition: Long, val id: Long, val type: Byte, val value: Any
 )
@@ -43,20 +41,16 @@ class KVBox(host: GuiXu, path: Path, name: String) : BasicBox(host, path, name) 
     private var mapFile = host.autoIncreaseFileBuilder(Path(path, "$name-K2IdMap"), 4, FileAccessMode.RW)
     private val mapFileAppendPosition = AtomicLong(0L)
 
-
     init {
         initialMap()
     }
 
-
     private fun initialMap() {
         val length = mapFile.length()
-
         map = HashMap<String, KVItem>(mapFile.readInt(0))
         mapFileAppendPosition.store(length)
+
         val buffer = ByteArray(32)
-
-
         var cursor = 4L
         var offset: Long
         var keyLength: Int
@@ -64,9 +58,7 @@ class KVBox(host: GuiXu, path: Path, name: String) : BasicBox(host, path, name) 
         var id: Long
         var key: String
         var data: Any
-
         while (cursor < length) {
-
             offset = cursor
             keyLength = mapFile.readInt(cursor)
             cursor += 4
@@ -85,7 +77,6 @@ class KVBox(host: GuiXu, path: Path, name: String) : BasicBox(host, path, name) 
             } else
                 convertByteArrayToData(getByte(id), type)
 
-
             map[key] = KVItem(
                 filePosition = offset,
                 type = type,
@@ -93,7 +84,6 @@ class KVBox(host: GuiXu, path: Path, name: String) : BasicBox(host, path, name) 
                 value = data
             )
         }
-//        println(map)
     }
 
     // only primitive
@@ -126,7 +116,6 @@ class KVBox(host: GuiXu, path: Path, name: String) : BasicBox(host, path, name) 
         }
     }
 
-
     private fun addKVItem(key: String, id: Long, type: Byte, data: Any): KVItem {
         val keyByteArray = key.toByteArray(charset = Charsets.UTF_8)
         var position = mapFileAppendPosition.fetchAndAdd(kvItemFixLength + keyByteArray.size)
@@ -146,6 +135,9 @@ class KVBox(host: GuiXu, path: Path, name: String) : BasicBox(host, path, name) 
         position += 8
 
         mapFile.write(position, keyByteArray, 0, keyByteArray.size)
+
+        // update map size
+        mapFile.writeInt(0, map.size shl 1)
         return item
     }
 
@@ -189,7 +181,6 @@ class KVBox(host: GuiXu, path: Path, name: String) : BasicBox(host, path, name) 
             map[key] = item.copy(type = valueTypeDelete, value = DeletedEmpty)
         }
     }
-
 
     fun putBoolean(key: String, data: Boolean) {
         putData(key, valueTypeBoolean, data)
