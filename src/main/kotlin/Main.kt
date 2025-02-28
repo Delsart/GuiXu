@@ -5,16 +5,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.io.files.Path
 import kotlinx.serialization.Serializable
-import work.delsart.guixu.db.GuiXu
-import work.delsart.guixu.db.bean.StoreData
-import work.delsart.guixu.db.box.TypedBox
+import work.delsart.guixu.GuiXu
+import work.delsart.guixu.bean.StoreData
+import work.delsart.guixu.box.TypedBox
+import work.delsart.guixu.utils.DangerousOperation
 import java.lang.Thread.sleep
 import java.util.concurrent.Executors
 import kotlin.Int
 import kotlin.String
 import kotlin.Unit
 import kotlin.repeat
-import kotlin.system.measureNanoTime
 import kotlin.system.measureTimeMillis
 
 
@@ -25,6 +25,8 @@ data class TestClass(
 //    val message: List<String> = emptyList<String>()
 ) : StoreData()
 
+
+@OptIn(DangerousOperation::class)
 fun main() {
     val path = Path("E:\\Projects\\GuiXuDB\\test")
     val db = GuiXu(path)
@@ -57,32 +59,12 @@ fun main() {
 
     normalTest(
         count = 1000,
-        create = { kvBox.putInt(it.toString(),0) },
-        update = { kvBox.putInt(it.toString(),1) },
-        read = { kvBox.getInt(it.toString()) },
-        remove = {  kvBox.remove(it.toString()) }
+        create = { kvBox.putString(it.toString(), "dasdas") },
+        update = { kvBox.putString(it.toString(), "dasdasdas") },
+        read = { kvBox.getString(it.toString()) },
+        remove = { kvBox.remove(it.toString()) }
     )
 
-}
-
-
-fun test() {
-    val i = 13213
-    var time = measureNanoTime {
-        repeat(1_000_000) {
-            i * 12
-        }
-
-    }
-    println("${time}ns")
-
-    time = measureNanoTime {
-        repeat(1_000_000) {
-            (i shl 3) + (i shl 2)
-        }
-
-    }
-    println("${time}ns")
 }
 
 
