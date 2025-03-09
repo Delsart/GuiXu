@@ -187,10 +187,11 @@ abstract class BasicBox(val host: GuiXu, val path: Path, val name: String) {
         }
         // reopen new object
         fileArray = arrayOf(
+            fileArray[0],
             FileItem(
                 indexFile = host.autoIncreaseFileBuilder(oldFileArray[0].indexFile.path, 0, FileAccessMode.RW),
                 storeFile = host.autoIncreaseFileBuilder(oldFileArray[0].storeFile.path, 0, FileAccessMode.RW)
-            ), oldFileArray[0]
+            ),
         )
         inCompactReplaceFile = false
 
